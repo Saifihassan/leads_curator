@@ -1,17 +1,16 @@
-research_task:
+query_creation_task:
   description: >
-    Conduct a thorough research about {topic}
-    Make sure you find any interesting and relevant information given
-    the current year is {current_year}.
+    Based strictly on the user's request: "{user_query}", create exactly 20 highly specialized search queries.
+    CRITICAL: You must ONLY target the specific platforms (e.g., LinkedIn, Instagram, X) and the specific locations requested by the user. Do not include platforms or locations that were not asked for.
   expected_output: >
-    A list with 10 bullet points of the most relevant information about {topic}
-  agent: researcher
+    A list of 20 advanced search queries formatted as bullet points tailored exactly to the user's request.
+  agent: query_creator
 
-reporting_task:
+data_scraping_task:
   description: >
-    Review the context you got and expand each topic into a full section for a report.
-    Make sure the report is detailed and contains any and all relevant information.
+    Use the 20 specialized queries provided by the query creator to search the web and scrape the relevant information.
+    CRITICAL: Extract data strictly matching the criteria from the user's request: "{user_query}". Only extract profiles for the requested platforms and locations.
   expected_output: >
-    A fully fledged report with the main topics, each with a full section of information.
-    Formatted as markdown without '```'
-  agent: reporting_analyst
+    A structured report detailing each lead found, along with their respective social media profiles and contact information, ensuring it strictly matches the user's requested platforms.
+  agent: web_scraper
+  output_file: output/reports.md
