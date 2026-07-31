@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
+load_dotenv(override=True)
 class SearchQueryList(BaseModel):
     queries: List[str] = Field(description="List of highly specialized search queries.")
 
@@ -21,8 +22,13 @@ class LeadProfile(BaseModel):
 class LeadReport(BaseModel):
     leads: List[LeadProfile] = Field(description="List of scraped leads")
 
-load_dotenv(override=True)
 
+# gpt4 = LLM(  # analyze
+#     model="gpt-5-mini",
+#     api_key=os.getenv("BLUESMIND_API_KEY"),
+#     base_url=os.getenv("BLUESMIND_BASE_URL"),
+    
+# )
 gpt4 = LLM(  # analyze
     model="minimax-m2.7",
     api_key=os.getenv("GENERALCOMPUTE_API_KEY"),
@@ -66,8 +72,8 @@ class LeadCurator():
     def data_scraping_task(self) -> Task:
         return Task(
             config=self.tasks_config['data_scraping_task'], # type: ignore[index]
-            output_file='report.json',
-            output_pydantic=LeadReport
+            output_pydantic=LeadReport,
+            output_file="results.json"
         )
 
     @crew

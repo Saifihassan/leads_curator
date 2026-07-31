@@ -13,4 +13,3 @@ data_scraping_task:
   expected_output: >
     A structured report detailing each lead found, along with their respective social media profiles and contact information, ensuring it strictly matches the user's requested platforms.
   agent: web_scraper
-  output_file: output/reports.md
