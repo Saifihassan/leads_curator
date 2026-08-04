@@ -11,17 +11,20 @@ load_dotenv(override=True)
 class SearchQueryList(BaseModel):
     queries: List[str] = Field(description="List of highly specialized search queries.")
 
-class LeadProfile(BaseModel):
-    name: Optional[str] = Field(description="Name of the person")
-    linkedin: Optional[str] = Field(description="LinkedIn profile URL")
-    email: Optional[str] = Field(description="Email address")
-    instagram: Optional[str] = Field(description="Instagram profile URL")
-    x_account: Optional[str] = Field(description="X (Twitter) profile URL")
-    other_info: Optional[str] = Field(description="Any other relevant extracted info")
+class Lead(BaseModel):
+    name: str
+    website: str | None
+    linkedin: str | None
+    email: str | None
+    phone: str | None
+    instagram: str | None
+    location: str | None
+    description: str | None
+    services: list[str]
+    source_url: str
 
-class LeadReport(BaseModel):
-    leads: List[LeadProfile] = Field(description="List of scraped leads")
-
+class LeadExtraction(BaseModel):
+    leads: list[Lead]
 
 # gpt4 = LLM(  # analyze
 #     model="gpt-5-mini",
@@ -33,7 +36,11 @@ gpt4 = LLM(  # analyze
     model="minimax-m2.7",
     api_key=os.getenv("GENERALCOMPUTE_API_KEY"),
     base_url=os.getenv("GENERALCOMPUTE_BASE_URL"),
-    
+)
+nara = LLM(  # analyze
+    model="stepfun-3.7-flash",
+    api_key=os.getenv("NARAROUTER_API_KEY"),
+    base_url=os.getenv("NARAROUTER_BASE_URL"),
 )
 
 
@@ -49,7 +56,7 @@ class LeadCurator():
         return Agent(
             config=self.agents_config['query_creator'], # type: ignore[index]
             verbose=True,
-            llm=gpt4
+            llm=nara
         )
 
     @agent
@@ -58,7 +65,16 @@ class LeadCurator():
             config=self.agents_config['web_scraper'], # type: ignore[index]
             verbose=True,
             tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
-            llm=gpt4
+            llm=nara
+        )
+
+    @agent
+    def lead_enricher(self) -> Agent:
+        return Agent(
+            config=self.agents_config['lead_enricher'], # type: ignore[index]
+            verbose=True,
+            tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
+            llm=nara
         )
 
     @task
@@ -72,8 +88,16 @@ class LeadCurator():
     def data_scraping_task(self) -> Task:
         return Task(
             config=self.tasks_config['data_scraping_task'], # type: ignore[index]
-            output_pydantic=LeadReport,
+            output_pydantic=LeadExtraction,
             output_file="results.json"
+        )
+
+    @task
+    def lead_enrichment_task(self) -> Task:
+        return Task(
+            config=self.tasks_config['lead_enrichment_task'], # type: ignore[index]
+            output_pydantic=LeadExtraction,
+         
         )
 
     @crew
