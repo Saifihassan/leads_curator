@@ -5,42 +5,32 @@ from lead_curator.tools.custom_tool import SearxngSearchTool, Crawl4aiSearchTool
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Literal
+
+from lead_curator.schemas import (
+    TaskPlan,
+    TargetURLList,
+    RawEntityList,
+    EnrichedEntityList,
+    OutreachTargetList
+)
 
 load_dotenv(override=True)
-class SearchQueryList(BaseModel):
-    queries: List[str] = Field(description="List of highly specialized search queries.")
 
-class Lead(BaseModel):
-    name: str
-    website: str | None
-    linkedin: str | None
-    email: str | None
-    phone: str | None
-    instagram: str | None
-    location: str | None
-    description: str | None
-    services: list[str]
-    source_url: str
-
-class LeadExtraction(BaseModel):
-    leads: list[Lead]
-
-# gpt4 = LLM(  # analyze
-#     model="gpt-5-mini",
-#     api_key=os.getenv("BLUESMIND_API_KEY"),
-#     base_url=os.getenv("BLUESMIND_BASE_URL"),
-    
-# )
-gpt4 = LLM(  # analyze
+minimax = LLM(  # analyze
     model="minimax-m2.7",
     api_key=os.getenv("GENERALCOMPUTE_API_KEY"),
     base_url=os.getenv("GENERALCOMPUTE_BASE_URL"),
 )
 nara = LLM(  # analyze
-    model="stepfun-3.7-flash",
+    model="mistral-large",
     api_key=os.getenv("NARAROUTER_API_KEY"),
     base_url=os.getenv("NARAROUTER_BASE_URL"),
+)
+gpt = LLM(  # analyze
+    model="gpt-5-mini",
+    api_key=os.getenv("BLUESMIND_API_KEY"),
+    base_url=os.getenv("BLUESMIND_BASE_URL"),
 )
 
 
@@ -51,53 +41,85 @@ class LeadCurator():
     agents: list[BaseAgent]
     tasks: list[Task]
 
-    @agent
-    def query_creator(self) -> Agent:
+
+    @agent 
+    def orchestrator(self) -> Agent:
         return Agent(
-            config=self.agents_config['query_creator'], # type: ignore[index]
+            config=self.agents_config['orchestrator'], # type: ignore[index]
             verbose=True,
-            llm=nara
+            llm=minimax
         )
 
     @agent
-    def web_scraper(self) -> Agent:
+    def research_agent(self) -> Agent:
         return Agent(
-            config=self.agents_config['web_scraper'], # type: ignore[index]
+            config=self.agents_config['research_agent'], # type: ignore[index]
+            verbose=True,
+            tools=[SearxngSearchTool()],
+            llm=gpt
+
+        )
+
+    @agent
+    def scraper_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config['scraper_agent'], # type: ignore[index]
+            verbose=True,
+            tools=[Crawl4aiSearchTool()],
+            llm=minimax
+        )
+
+    @agent
+    def enricher_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config['enricher_agent'], # type: ignore[index]
             verbose=True,
             tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
             llm=nara
         )
 
     @agent
-    def lead_enricher(self) -> Agent:
+    def data_processor(self) -> Agent:
         return Agent(
-            config=self.agents_config['lead_enricher'], # type: ignore[index]
+            config=self.agents_config['data_processor'], # type: ignore[index]
             verbose=True,
-            tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
-            llm=nara
+            llm=minimax
         )
 
     @task
-    def query_creation_task(self) -> Task:
+    def plan_outreach_mission(self) -> Task:
         return Task(
-            config=self.tasks_config['query_creation_task'], # type: ignore[index]
-            output_pydantic=SearchQueryList
+            config=self.tasks_config['plan_outreach_mission'], # type: ignore[index]
+            output_pydantic=TaskPlan
         )
 
     @task
-    def data_scraping_task(self) -> Task:
+    def discover_target_urls(self) -> Task:
         return Task(
-            config=self.tasks_config['data_scraping_task'], # type: ignore[index]
-            output_pydantic=LeadExtraction,
+            config=self.tasks_config['discover_target_urls'], # type: ignore[index]
+            output_pydantic=TargetURLList
+        )
+
+    @task
+    def scrape_discovered_urls(self) -> Task:
+        return Task(
+            config=self.tasks_config['scrape_discovered_urls'], # type: ignore[index]
+            output_pydantic=RawEntityList
+        )
+
+    @task
+    def enrich_incomplete_entities(self) -> Task:
+        return Task(
+            config=self.tasks_config['enrich_incomplete_entities'], # type: ignore[index]
+            output_pydantic=EnrichedEntityList
+        )
+
+    @task
+    def refine_and_format_output(self) -> Task:
+        return Task(
+            config=self.tasks_config['refine_and_format_output'], # type: ignore[index]
+            output_pydantic=OutreachTargetList,
             output_file="results.json"
-        )
-
-    @task
-    def lead_enrichment_task(self) -> Task:
-        return Task(
-            config=self.tasks_config['lead_enrichment_task'], # type: ignore[index]
-            output_pydantic=LeadExtraction,
-         
         )
 
     @crew

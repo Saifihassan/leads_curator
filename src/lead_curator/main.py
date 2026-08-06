@@ -14,7 +14,7 @@ def run():
     Run the crew.
     """
     inputs = {
-        "user_query": "linkedin profiles of marketing agencies situated in Mumbai, Bengaluru, Delhi NCR, Hyderabad, and Pune"
+        "user_query": "twitter/x,instagram handles of marketing agencies situated in Mumbai,delhi"
     }
 
     try:

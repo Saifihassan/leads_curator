@@ -1,65 +1,189 @@
-query_creation_task:
+# tasks.yaml — Freelance Outreach Agent System
+# Task flow: Orchestrate → Research → Scrape → Enrich → Process
+
+# ───────────────────────────────────────────────
+# TASK 1: ORCHESTRATOR
+# ───────────────────────────────────────────────
+plan_outreach_mission:
   description: >
-    Generate exactly 20 unique search queries for:
+    Analyze the user's outreach request and produce a structured TaskPlan.
 
-    "{user_query}"
+    USER REQUEST: {user_query}
 
-    The queries should maximize search coverage while remaining strictly relevant.
+    Your job is to:
+    1. Identify the ENTITY TYPE being requested (person, company, job_posting, event, group)
+    2. Identify TARGET PLATFORMS (linkedin, twitter, website, clutch, other)
+    3. Extract LOCATION constraints (city, country, region)
+    4. Extract INDUSTRY or KEYWORD constraints
+    5. Determine REQUIRED OUTPUT FIELDS the user implicitly needs
+    6. Choose the best SEARCH STRATEGY:
+       - "direct_site_search" for LinkedIn/Twitter via site: dorks
+       - "directory_scrape" for Clutch, G2, Crunchbase listings
+       - "hybrid" for complex multi-source needs
+    7. Set ESTIMATED RESULTS target (default 20, max 50)
+    8. Note any SPECIAL INSTRUCTIONS (e.g., "only companies hiring", "CEOs only")
 
-    Do not search.
-    Do not explain.
-    Only generate queries.
-
+    Output MUST be a valid JSON matching the TaskPlan schema.
+    Do not search the web. Do not scrape. Only reason and plan.
   expected_output: >
-    A list of exactly 20 search queries.
-    
-  agent: query_creator
+    A single JSON object matching the TaskPlan Pydantic schema with all fields populated.
+  agent: orchestrator
 
-data_scraping_task:
+# ───────────────────────────────────────────────
+# TASK 2: RESEARCH AGENT
+# ───────────────────────────────────────────────
+discover_target_urls:
   description: >
-    Use the generated search queries to search the web.
+    Using the TaskPlan, generate and execute search queries via SearXNG
+    to discover relevant URLs for scraping.
 
-    Visit relevant pages.
+    Your job is to:
+    1. Generate 3-5 high-precision search queries based on the TaskPlan.
+       Use site-specific dorks when appropriate:
+       - LinkedIn companies: "site:linkedin.com/company [industry] [location]"
+       - LinkedIn people: "site:linkedin.com/in [title] [company] [location]"
+       - Directories: "top [industry] agencies [location] clutch"
+       - Twitter: "site:twitter.com [keyword] [location]"
+    2. Execute each query via searxng_search tool.
+    3. Evaluate each result for relevance (0.0 to 1.0).
+    4. Classify page type: linkedin_profile, linkedin_company, directory_listing,
+       personal_website, twitter_profile, job_posting, or unknown.
+    5. Rank by relevance and return the top URLs (up to task_plan.estimated_results * 2).
 
-    Extract only verifiable information.
+    For each URL, provide:
+    - url: the exact URL
+    - source_query: which query found it
+    - relevance_score: your confidence this URL matches the intent
+    - page_type: classification
+    - priority: 1 = scrape first, 3 = scrape last
 
-    Never invent data.
-
-    Return null for unknown fields.
-
-    Ignore duplicate companies.
-
-    Prefer official company websites over third-party sources.
-
+    Do NOT scrape the pages. Only discover and rank URLs.
   expected_output: >
-    A JSON object containing verified leads.
+    A JSON array of TargetURL objects, ranked by relevance_score descending.
+  agent: research_agent
+  context:
+    - plan_outreach_mission
 
-  agent: web_scraper
-
-lead_enrichment_task:
+# ───────────────────────────────────────────────
+# TASK 3: SCRAPER AGENT
+# ───────────────────────────────────────────────
+scrape_discovered_urls:
   description: >
-    Take the verified leads produced by the Lead Discovery Agent.
+    Scrape each TargetURL using Crawl4AI and extract structured entity data.
 
-    For each lead:
+    Your job is to:
+    1. Iterate through each TargetURL in priority order.
+    2. For each URL, call crawl4ai_scrape with an extraction schema
+       appropriate for the page_type:
+       - linkedin_company: extract name, industry, location, employee_count,
+         website, description, specialties
+       - linkedin_profile: extract name, headline, location, current_company,
+         experience_summary, education
+       - directory_listing: extract name, location, website, services,
+         contact_info, ratings
+       - twitter_profile: extract name, handle, bio, location, follower_count,
+         recent_tweets_summary
+       - personal_website: extract name, title, services, contact, about
+    3. For each extraction, record:
+       - source_url
+       - extracted_data (key-value pairs)
+       - extraction_confidence (0.0-1.0)
+       - errors (if any field failed or page was blocked)
+    4. If a page fails (blocked, timeout, CAPTCHA), mark it failed and move on.
+       Do NOT retry the same URL more than once.
+    5. Respect rate limits: add a 2-second delay between requests.
 
-    - Visit the official website.
-    - Visit the About page.
-    - Visit the Contact page.
-    - Visit the requested social platforms.
-    - Extract any missing business information.
-    - Improve the company description using only verified information.
-    - Expand the services list only when explicitly mentioned.
+    EXTRACTION RULES (CRITICAL):
+    - Do NOT hallucinate or guess missing fields. If a field is not explicitly visible on the page, return null.
+    - Stop guessing emails: If an email is not explicitly written on the source page, it must be null. Do not invent emails.
+    - Stop guessing phone numbers: Only output phone numbers found verbatim on the page. Do not invent or generate sequential numbers.
+    - Decision-maker LinkedIn URLs MUST be their personal profile (linkedin.com/in/...) and NOT a company page. Do not extract company pages as decision-maker URLs.
 
-    Rules:
-
-    - Never invent information.
-    - Never replace verified fields with guesses.
-    - Return null for missing values.
-    - Preserve existing data.
-    - Ignore unrelated websites.
-    - Ignore duplicate companies.
-
+    Return all extracted entities as a JSON array.
   expected_output: >
-    A JSON object containing enriched leads using the LeadCollection schema.
+    A JSON array of RawEntity objects, one per successfully scraped URL.
+  agent: scraper_agent
+  context:
+    - discover_target_urls
+    - plan_outreach_mission
 
-  agent: lead_enricher
+# ───────────────────────────────────────────────
+# TASK 4: ENRICHER AGENT
+# ───────────────────────────────────────────────
+enrich_incomplete_entities:
+  description: >
+    Audit scraped entities against the TaskPlan's required_fields. For every
+    entity missing critical data, conduct targeted enrichment.
+
+    Your job is to:
+    1. Compare each RawEntity against task_plan.required_fields.
+    2. For each missing field, decide the best enrichment strategy:
+       - Missing website? → Search "[company name] official website"
+       - Missing decision-maker? → Search "[company name] CEO LinkedIn" or
+         "[company name] founder LinkedIn"
+       - Missing email? → Search "[company name] contact email" or
+         "[person name] email [company domain]"
+       - Missing LinkedIn for a person? → Search "[person name] [company] LinkedIn"
+       - Missing Twitter? → Search "[company name] Twitter"
+    3. Execute searches via searxng_search.
+    4. Scrape promising result URLs via crawl4ai_scrape.
+    5. Validate findings: if two sources conflict, prefer the more authoritative one
+       (official website > directory > social mention).
+    6. Record every enrichment with its source URL.
+
+    Enrichment rules:
+    - Never invent data. If you cannot find it, mark it null.
+    - Stop guessing emails: Do NOT construct decision-maker emails from name + domain. If you do not explicitly find an email on the page, mark it as null.
+    - Decision-maker LinkedIn URLs MUST be their personal profile (linkedin.com/in/...) and NOT a company page.
+    - Do not enrich more than 3 fields per entity to avoid excessive API calls.
+    - Focus on the most impactful missing fields first.
+
+    Return enriched entities with all added data documented.
+  expected_output: >
+    A JSON array of EnrichedEntity objects with enrichment_sources documented.
+  agent: enricher_agent
+  context:
+    - scrape_discovered_urls
+    - plan_outreach_mission
+
+# ───────────────────────────────────────────────
+# TASK 5: DATA PROCESSOR
+# ───────────────────────────────────────────────
+refine_and_format_output:
+  description: >
+    Process enriched entities through deduplication, normalization,
+    validation, and schema formatting to produce the final output.
+
+    Your job is to:
+    1. DEDUPLICATE: Use fuzzy matching on name + location + platform to merge
+       duplicate entities found across multiple sources. Keep the version with
+       the highest confidence score as the base, merge missing fields from others.
+    2. NORMALIZE:
+       - Locations: "Pune, Maharashtra" → "Pune, India"
+       - Company sizes: "11-50 employees" → "11-50"
+       - URLs: ensure https:// prefix, remove tracking parameters
+       - Names: title case for people, preserve brand casing for companies
+    3. VALIDATE & FILTER LOCATION (Strict):
+       - If task_plan.location is specified, strictly verify that the entity's location or headquarters matches or contains the requested city.
+       - Calculate `location_relevance_score`: Headquarters matches = 1.0, General office/location matches = 0.6, just mentions in description = 0.2.
+       - Discard any entity with a location_relevance_score < 0.6.
+       - URLs: must be valid format and return 200 (if possible to check)
+       - Emails: must match email regex pattern
+       - LinkedIn URLs: must contain linkedin.com
+       - Remove entities with < 2 required fields populated
+    4. COMPUTE CONFIDENCE:
+       - Base confidence from extraction + enrichment
+       - Penalize for each missing required field (-0.1 per field)
+       - Boost for cross-referenced fields (+0.05 per independent source)
+       - Cap at 1.0, floor at 0.0
+    5. SORT by location_relevance_score descending, then confidence_score descending.
+    6. LIMIT to task_plan.estimated_results.
+    7. FORMAT as OutreachTarget schema.
+
+    Return the final array of OutreachTarget objects.
+  expected_output: >
+    A JSON array of OutreachTarget objects, deduplicated, validated, and ranked.
+  agent: data_processor
+  context:
+    - enrich_incomplete_entities
+    - plan_outreach_mission
