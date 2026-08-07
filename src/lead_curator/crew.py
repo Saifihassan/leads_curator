@@ -75,7 +75,7 @@ class LeadCurator():
             config=self.agents_config['enricher_agent'], # type: ignore[index]
             verbose=True,
             tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
-            llm=nara
+            llm=minimax
         )
 
     @agent
