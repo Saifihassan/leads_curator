@@ -10,8 +10,6 @@ from typing import List, Optional, Literal
 from lead_curator.schemas import (
     TaskPlan,
     TargetURLList,
-    RawEntityList,
-    EnrichedEntityList,
     OutreachTargetList
 )
 
@@ -75,16 +73,10 @@ class LeadCurator():
             config=self.agents_config['enricher_agent'], # type: ignore[index]
             verbose=True,
             tools=[SearxngSearchTool(), Crawl4aiSearchTool()],
-            llm=minimax
+            llm=gpt
         )
 
-    @agent
-    def data_processor(self) -> Agent:
-        return Agent(
-            config=self.agents_config['data_processor'], # type: ignore[index]
-            verbose=True,
-            llm=minimax
-        )
+
 
     @task
     def plan_outreach_mission(self) -> Task:
@@ -104,20 +96,13 @@ class LeadCurator():
     def scrape_discovered_urls(self) -> Task:
         return Task(
             config=self.tasks_config['scrape_discovered_urls'], # type: ignore[index]
-            output_pydantic=RawEntityList
+            output_pydantic=OutreachTargetList
         )
 
     @task
     def enrich_incomplete_entities(self) -> Task:
         return Task(
             config=self.tasks_config['enrich_incomplete_entities'], # type: ignore[index]
-            output_pydantic=EnrichedEntityList
-        )
-
-    @task
-    def refine_and_format_output(self) -> Task:
-        return Task(
-            config=self.tasks_config['refine_and_format_output'], # type: ignore[index]
             output_pydantic=OutreachTargetList,
             output_file="results.json"
         )
